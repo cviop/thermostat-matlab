@@ -1,12 +1,12 @@
 function PID_test
 
 
-serialportlist;
+serialports = serialportlist;
 %clear dev
 clear;clc; close all force;close all;
 
-
-regulator = serialport("COM4",115200);
+%regulator = serialport;
+global regulator;
 
 wlen = 1400;
 temperatureWindow = zeros(wlen,1);
@@ -125,11 +125,66 @@ dSwitch.Value = 'On';
 dSwitch.ValueChangedFcn = @dActiveChange;
 
 %% Text field
-uilabel(LeftPanel, HorizontalAlignment='center', Position=[94 130 100 30], Text="Integrator max");
+uilabel(LeftPanel, HorizontalAlignment='center', Position=[170 130 55 30], Text="Integ max");
 IntegratorMaxTextField = uieditfield(LeftPanel);
-IntegratorMaxTextField.Position = [114 100 60 30];
+IntegratorMaxTextField.Position = [170 100 55 30];
 IntegratorMaxTextField.Value = num2str(IntegratorMax);
 IntegratorMaxTextField.ValueChangedFcn = @(t,~)IntegratorMaxChange;
+
+uilabel(LeftPanel, HorizontalAlignment='center', Position=[110 130 55 30], Text="Integ min");
+IntegratorMinTextField = uieditfield(LeftPanel);
+IntegratorMinTextField.Position = [110 100 55 30];
+IntegratorMinTextField.Value = num2str(IntegratorMin);
+IntegratorMinTextField.ValueChangedFcn = @(t,~)IntegratorMinChange;
+
+%% Serial port connect
+%SelectserialportDropDownLabel
+SelectserialportDropDownLabel = uilabel(LeftPanel);
+SelectserialportDropDownLabel.HorizontalAlignment = 'right';
+SelectserialportDropDownLabel.Position = [13 676 95 22];
+SelectserialportDropDownLabel.Text = 'Select serial port';
+
+%SelectserialportDropDown
+SelectserialportDropDown = uidropdown(LeftPanel);
+SelectserialportDropDown.Position = [123 676 100 22];
+SelectserialportDropDown.Items = {};
+SelectserialportDropDown.Placeholder = 'Select COM';
+
+%RefreshButton
+RefreshButton = uibutton(LeftPanel, 'push');
+RefreshButton.ButtonPushedFcn = @sefreshSerial;
+RefreshButton.Position = [13 647 51 22];
+RefreshButton.Text = 'Refresh';
+
+%ConnectButton
+ConnectButton = uibutton(LeftPanel, 'push');
+ConnectButton.ButtonPushedFcn = @connectToSerial;
+ConnectButton.Position = [69 647 54 22];
+ConnectButton.Text = 'Connect';
+
+%DisconnectButton
+DisconnectButton = uibutton(LeftPanel, 'push');
+DisconnectButton.ButtonPushedFcn = @disconnectTFromSerial;
+DisconnectButton.Position = [127 647 74 22];
+DisconnectButton.Text = 'Disconnect';
+
+%ConnectedLamp
+ConnectedLamp = uilamp(LeftPanel);
+ConnectedLamp.Position = [207 649 16 16];
+ConnectedLamp.Color = 'red';
+
+%MSG window
+DebugmsgTextArea = uitextarea(LeftPanel);
+DebugmsgTextArea.FontSize = 9;
+DebugmsgTextArea.Position = [21 535 200 73];
+DebugmsgTextArea.Value = {'...'};
+
+%Label
+DebugmsgTextAreaLabel = uilabel(LeftPanel);
+DebugmsgTextAreaLabel.HorizontalAlignment = 'center';
+DebugmsgTextAreaLabel.Position = [21 613 200 22];
+DebugmsgTextAreaLabel.Text = 'Debug msg';
+
 
 %% Graphs
 %temperature
@@ -169,30 +224,28 @@ legend(hAx,'P','I','D','PIDout');
 hFig.Visible = 'on';
 
 disp("gui done")
-%return
+
 
 %% Timers
 pidTm = timer; % create an instance of timer
 pidTm.Period = 0.005;
 pidTm.ExecutionMode = 'fixedSpacing';
 %pidTm.BusyMode = 'drop';
-pidTm.TimerFcn = @(h,~)pidLoop(regulator);
+pidTm.TimerFcn = @pidLoop;
 
 
 dispTm = timer; % create an instance of timer
-dispTm.Period = .5;
+dispTm.Period = .3;
 dispTm.ExecutionMode = 'fixedRate';
 dispTm.BusyMode = 'drop';
 dispTm.TimerFcn = @(t,~)updateGUI;
 
-start(pidTm); % start the timer
-start(dispTm);
 
 %% PID Loop
-function pidLoop(device)
-    write(device,101,"uint8");
+function pidLoop(src,event)
+    write(regulator,101,"uint8");
     
-    temperature = read(device, 1, 'uint8')/255 *100 + 20;
+    temperature = read(regulator, 1, 'uint8')/255 *100 + 20;
    
     err = SetPoint-temperature;
 
@@ -201,7 +254,7 @@ function pidLoop(device)
     % Integral 
     outI = outI + Ki*T*(err+errPrev);
     % Clamping
-    outI(outI<IntegratorMin) = 0;
+    outI(outI<IntegratorMin) = IntegratorMin;
     outI(outI>IntegratorMax) = IntegratorMax;
     
     % Derivative
@@ -211,7 +264,7 @@ function pidLoop(device)
     outPID = pON*outP + iON*outI - dON*outD;
     outPID(outPID<0) = 0;
     outPID(outPID>100) = 100;
-    write(device,outPID,'uint8');
+    write(regulator,outPID,'uint8');
 
     % Save actual values to display buffer
     temperatureWindow(end) = temperature;
@@ -266,6 +319,10 @@ function IntegratorMaxChange(~)
     IntegratorMax = str2double(IntegratorMaxTextField.Value);
 end
 
+function IntegratorMinChange(~)
+    IntegratorMin = str2double(IntegratorMinTextField.Value);
+end
+
 function resetIfunction(~)
     outI = 0;
 end
@@ -307,16 +364,67 @@ function dActiveChange(src,event)
     end
 end
 
+function sefreshSerial(app, event)
+    serialports = serialportlist;
+    SelectserialportDropDown.Items = serialports;
+end
+
+function connectToSerial(app, event)
+    %clear regulator;
+    try
+        regulator = serialport(SelectserialportDropDown.Value,115200);
+    catch ME
+        if(strcmp(ME.identifier , 'serialport:serialport:ConnectionFailed'))
+            ConnectedLamp.Color = 'red';
+            DebugmsgTextArea.Value = ME.message;
+            clear regulator;
+            regulator.Port = '';
+        end
+    end
+    if(strcmp(regulator.Port , SelectserialportDropDown.Value))
+        ConnectedLamp.Color = 'green';
+        start(pidTm); % start the timer
+        start(dispTm);
+    else
+        ConnectedLamp.Color = 'red';
+    end
+
+   
+end
+
+function disconnectTFromSerial(app, event)
+    stop(pidTm); % start the timer
+    stop(dispTm);
+    try
+        write(regulator,0,"uint8");
+    catch ME
+        if(strcmp(ME.identifier , 'transportlib:transport:invalidConnectionState'))
+            DebugmsgTextArea.Value = ME.message;
+            ConnectedLamp.Color = 'red';
+        end
+    end
+    clear regulator;
+    ConnectedLamp.Color = 'red';
+end
+
 
 function exitFunction(~)
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    end
     stop(timerfind);
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    end
     delete(timerfind);
     pause(0.5);
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    end
     close all force;
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    end
     return
 end
 
