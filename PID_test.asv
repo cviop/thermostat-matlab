@@ -1,12 +1,20 @@
 function PID_test
 
 
+% %% Funkce
+% Tento skript slouží k regulaci reploty podle ovlivňování výkonu na topné spirále. 
+
+% V GUI lze nastavovat jednotlivé PID konstanty a jednotlivě je vypínat. 
+% V grafech se po připojení sysému zobrazí průběhy teplot a procentuální
+% výkon, kterým spirála topí. Komunikace probíhá přes UART o rychlosti
+% 115200 bps a daný COM port je volen přímo v GUI. 
+
 serialports = serialportlist;
 %clear dev
 clear;clc; close all force;close all;
 
-%regulator = serialport;
-global regulator;
+
+global regulator; %% serial object of connected device, connection is estabilished later in the code
 
 wlen = 1400;
 temperatureWindow = zeros(wlen,1);
@@ -95,7 +103,7 @@ setDSlider = uislider(LeftPanel);
 setDSlider.ValueChangedFcn = @(t,~)KdChange;
 setDSlider.Value = Kd;
 setDSlider.Position = [12 200 210 3];
-setDSlider.Limits = [0 1];
+setDSlider.Limits = [0 10];
 
 %% Buttons
 resetIButton = uibutton(LeftPanel);
@@ -235,7 +243,7 @@ pidTm.TimerFcn = @pidLoop;
 
 
 dispTm = timer; % create an instance of timer
-dispTm.Period = .3;
+dispTm.Period = .5;
 dispTm.ExecutionMode = 'fixedRate';
 dispTm.BusyMode = 'drop';
 dispTm.TimerFcn = @(t,~)updateGUI;
@@ -370,16 +378,18 @@ function sefreshSerial(app, event)
 end
 
 function connectToSerial(app, event)
-    %clear regulator;4
+    %clear regulator;
     try
         regulator = serialport(SelectserialportDropDown.Value,115200);
     catch ME
-        if(ME.identifier == 'serialport:serialport:ConnectionFailed')
+        if(strcmp(ME.identifier , 'serialport:serialport:ConnectionFailed'))
             ConnectedLamp.Color = 'red';
             DebugmsgTextArea.Value = ME.message;
+            clear regulator;
+            regulator.Port = '';
         end
     end
-    if(regulator.Port == SelectserialportDropDown.Value)
+    if(strcmp(regulator.Port , SelectserialportDropDown.Value))
         ConnectedLamp.Color = 'green';
         start(pidTm); % start the timer
         start(dispTm);
@@ -396,7 +406,7 @@ function disconnectTFromSerial(app, event)
     try
         write(regulator,0,"uint8");
     catch ME
-        if(ME.identifier == 'transportlib:transport:invalidConnectionState')
+        if(strcmp(ME.identifier , 'transportlib:transport:invalidConnectionState'))
             DebugmsgTextArea.Value = ME.message;
             ConnectedLamp.Color = 'red';
         end
@@ -407,14 +417,33 @@ end
 
 
 function exitFunction(~)
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    catch ME
+        DebugmsgTextArea.Value = ME.message;
+    end
+
     stop(timerfind);
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    catch ME
+        DebugmsgTextArea.Value = ME.message;
+    end
+
     delete(timerfind);
     pause(0.5);
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    catch ME
+        DebugmsgTextArea.Value = ME.message;
+    end
+
     close all force;
-    write(regulator, 0, "uint8");
+    try
+        write(regulator, 0, "uint8");
+    catch ME
+        DebugmsgTextArea.Value = ME.message;
+    end
     return
 end
 
